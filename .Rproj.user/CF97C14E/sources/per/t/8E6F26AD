@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1574729565196.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "534292241",
+    "id" : "8E6F26AD",
+    "lastKnownWriteTime" : 1574859227,
+    "last_content_update" : 1574859227190,
+    "path" : "~/Dropbox/MATTEL/R_script/mattel_q3-4.R",
+    "project_path" : "R_script/mattel_q3-4.R",
+    "properties" : {
+        "cursorPosition" : "258,0",
+        "scrollLine" : "239"
+    },
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

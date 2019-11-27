@@ -1,0 +1,259 @@
+---
+title: "MATTEL DATA TEST"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'DATA_PROCESSING.html'))})
+output: html_document
+runtime: shiny
+---
+## Supporting Materials
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo = FALSE, include=FALSE}
+rm(list=ls())
+library(tidyverse)
+library(corrplot)
+library(cowplot)
+library(VIM)
+library(missForest)
+library(Boruta)
+library(caret)
+library(glmnet)
+library(rsample)
+library(Metrics)
+library(randomForest)
+library(scales)
+library(viridis)
+
+df_origin<- read_csv("data/data.csv")
+load("data/train.rda")
+load("data/test.rda")
+```
+
+
+</div>
+<div style="margin-top:50px;">
+##### Missing data and outliers
+<div style="margin-bottom:20px;">
+</div>
+```{r echo = FALSE, include=FALSE}
+miss<- aggr(df_origin)
+```
+
+The variables 'PoolQC', 'MiscFeature' and 'Alley' are missing more than 93% of data while the variable 'Fence' is missing about 80% of data. The variable 'FireplaceQu' is missing a liitle bit less than 50% of its data whereas the variable 'LotFrontage' is missing about 17% of its data. All other variables are either missing less that 5% of the data or don't contain missing vallues. 
+
+Based on the data description, PoolQC is NaN when there is no pool, hence, I changed missing value to 'No_Pool'. Similar approaches were applied to 'Fence', 'FireplaceQu','garage', and 'basement'related features. Next, variable mean was used to fill missing data for the 'LotFrontage' and 'MasVnrArea' variables. 
+
+There are 4 outliers whose GrLivArea are above 4000 square ft.
+
+After filling missing value and delete outliers, I split the dataset into traing and testing sets using 0.75 partition.
+
+```{r echo = FALSE, results='hide',fig.keep='all', fig.width=20, fig.height=10}
+#chart for missing values
+aggr(df_origin %>% select(-Id), numbers = TRUE,col=c('papayawhip','sienna1'), prop = c(TRUE, TRUE),cex.axis=0.6, gap=0.1)
+```
+<br>
+```{r echo = FALSE,fig.align='center',out.width = '60%' }
+df_origin %>%
+    ggplot(aes(x=GrLivArea, y=SalePrice, color=SalePrice)) +
+    geom_point() +
+    scale_color_viridis_c(option = "plasma", direction=-1,labels = comma)+
+    scale_y_continuous(labels = comma)+
+  theme_cowplot()+
+    ggtitle("Sale price versus above grade living area ") +
+    xlab("Above grade living area (square feet)")+
+    ylab("Sale price")+
+    theme(plot.title = element_text(hjust = 0.5))
+  
+```
+
+</div>
+<div style="margin-top:50px;">
+##### Data Exploration
+<div style="margin-bottom:20px;">
+</div>
+
+For categorical variable, check distribution of SalePrice with respect to variable values, only applied to training set.
+
+```{r echo = FALSE, include=FALSE}
+cat_df<-
+train %>%
+  select_if(is.factor) %>% 
+  mutate(SalePrice= train$SalePrice) 
+
+colNames <- names(cat_df)[1:43]
+
+plt_list=list()
+for(i in colNames){
+  plt_list[[i]] <- 
+    ggplot(cat_df, aes_string(x=i, y = cat_df$SalePrice, fill= i)) +
+    geom_boxplot(varwidth = TRUE, alpha=0.2) +
+    scale_y_continuous(labels = comma)+
+    theme(legend.position = "none") 
+}
+```
+
+```{r echo = FALSE,out.width = '30%'}
+for (i in 1:length(plt_list)){
+  plot(plt_list[[i]])
+}
+
+```
+
+For numerical variable, check correlation between SalePrice and variable values, only applied to training set.
+
+```{r echo = FALSE, include=FALSE}
+correlations <- cor(train%>%select_if(is.numeric), use="everything")
+```
+
+```{r echo = FALSE,fig.width=20, fig.height=15}
+corrplot(correlations, method="circle", type="lower",  tl.cex= 1.2,
+         sig.level = 0.01, insig = "blank", tl.col="black")
+```
+
+Combine numerical and categorical to evaluate feature importance, only applied to training set.\
+Recursive Feature Elimination (RFE) method also identified 16 candidate variables: "GrLivArea", "Neighborhood", "OverallQual", "BsmtFinSF1", "TotalBsmtSF", "1stFlrSF", "GarageArea", "2ndFlrSF", "GarageCars", "LotArea", "ExterQual", "GarageType", "FireplaceQu", "BsmtFinType1", "KitchenQual", and "OverallCond".
+
+```{r echo = FALSE,fig.width=20, fig.height=10}
+set.seed(45)
+bor.results <- Boruta(train %>% select(- SalePrice),train$SalePrice, maxRuns=101, doTrace=0)
+plot(bor.results, las=2, cex.axis=0.7, xlab='')
+title("Feature Importance Using Boruta Algo")
+```
+
+</div>
+<div style="margin-top:50px;">
+##### Feature Engineering and Model Selection
+<div style="margin-bottom:20px;">
+</div>
+```{r echo = FALSE, include=FALSE}
+# Create training and testing feature model matrices and response vectors.
+# we use model.matrix(...)[, -1] to discard the intercept
+train_x <- model.matrix(SalePrice ~ ., train)[, -1]
+train_y <- log(train$SalePrice)
+
+test_x <- model.matrix(SalePrice ~ ., test)[, -1]
+test_y <- log(test$SalePrice)
+
+
+# Apply CV Ridge regression to ames data
+cv_ridge <- cv.glmnet(x = train_x,y = train_y, alpha = 0)
+
+ridge_coefs <- coef(cv_ridge) 
+
+ridge_coef_frame <- 
+  data.frame(ridge_coefs = rownames(ridge_coefs)[-1],value = ridge_coefs[-1,1]) %>%
+  filter(value != 0) %>%
+  top_n(30, wt = abs(value)) 
+
+
+ridge_coef_frame_plot <- 
+  ggplot(ridge_coef_frame, aes(x=reorder(ridge_coefs,value), y=value, color= value > 0)) + 
+  geom_pointrange(aes(ymin=0, ymax=value),show.legend = FALSE) + 
+  ggtitle("Coefficients of ridge model") + 
+  coord_flip() +
+  ylab("Coefficient") +
+  xlab(NULL) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+# Apply CV lasso regression to ames data
+cv_lasso <- cv.glmnet(x = train_x, y = train_y,alpha = 1)
+lasso_coefs <- coef(cv_lasso) 
+
+lasso_coef_frame <- 
+  data.frame(lasso_coefs = rownames(lasso_coefs)[-1],value = lasso_coefs[-1,1]) %>%
+  filter(value != 0)
+  
+lasso_coef_frame_plot <- 
+  ggplot(lasso_coef_frame, aes(x=reorder(lasso_coefs,value), y=value, color= value > 0)) + 
+  geom_pointrange(aes(ymin=0, ymax=value),show.legend = FALSE) + 
+  ggtitle("Coefficients of lasso model") + 
+  coord_flip() +
+  ylab("Coefficient") +
+  xlab(NULL) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# predict
+lasso_pred <- predict(cv_lasso, s = cv_lasso$lambda.min, test_x)
+ridge_pred <- predict(cv_ridge, s = cv_ridge$lambda.min, test_x)
+```
+
+```{r echo = FALSE,fig.width=20, fig.height=10}
+plot_grid(ridge_coef_frame_plot, lasso_coef_frame_plot, labels = c('A', 'B'))
+```
+
+
+```{r echo = FALSE, include=FALSE}
+RF_model <- randomForest(SalePrice ~ ., data=train)
+
+# Predict using the test set
+rf_prediction <- predict(RF_model, test)
+rf_prediction
+```
+
+
+
+
+</div>
+<div style="margin-top:50px;">
+##### Prediction
+<div style="margin-bottom:20px;">
+</div>
+```{r echo = FALSE, include=FALSE}
+prediction_df<- 
+  cbind (test_y,lasso_pred,ridge_pred, log(rf_prediction)) %>%
+  as.data.frame() %>%
+  setnames(c("Actual_sale_price", "Lasso","Ridge", "Random_Forest")) %>%
+  mutate(Actual_sale_price=exp(Actual_sale_price)) %>%
+  mutate(Lasso=exp(Lasso)) %>%
+  mutate(Ridge=exp(Ridge)) %>%
+  mutate(Random_Forest=exp(Random_Forest)) 
+  
+
+P<- 
+  prediction_df %>%
+  gather('prediction_type', 'predicted_sale_price', Lasso,Ridge,Random_Forest) %>%
+  ggplot(aes(x= Actual_sale_price, y=predicted_sale_price , color= Actual_sale_price))+
+  geom_point(shape = 19,alpha= 0.5, size= 2) +
+  geom_abline(aes(intercept = 0 , slope= 1 ), linetype= "dashed") +
+  scale_size(range = c(0.5, 5))  +
+  scale_x_log10(labels = comma)+
+  scale_y_log10(labels = comma)+
+  scale_color_viridis_c("Sale price ($)",option="plasma",labels = comma) +
+  facet_wrap(~prediction_type,ncol = 3)+
+  theme_bw() +
+  xlab("Actual Sale Price (dollars)") +
+  ylab("Predicted Sale Price (dollars)")
+
+P
+
+rmse(prediction_df$Actual_sale_price, prediction_df$Lasso)
+rmse(prediction_df$Actual_sale_price, prediction_df$Ridge)
+rmse(prediction_df$Actual_sale_price, prediction_df$Random_Forest)
+
+dat_text <- data.frame(
+  label = c("RMSE= 21480", "RMSE=21873", "RMSE=28519"),
+  prediction_type = c('Lasso', 'Ridge', 
+                      'Random_Forest'),
+  Actual_sale_price     = c(300000, 300000, 300000),
+  predicted_price    = c(50000, 50000, 50000))
+
+
+P2<- P + geom_text(
+  data   = dat_text,
+  aes(x = Actual_sale_price, y = predicted_price, label = label), color= "black") +
+  theme(axis.text=element_text(size=12), strip.text.x = element_text(size = 15))
+
+```
+
+```{r echo = FALSE,fig.width=15, fig.height=5}
+P2
+```
+

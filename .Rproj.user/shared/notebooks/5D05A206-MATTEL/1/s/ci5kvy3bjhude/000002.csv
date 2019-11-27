@@ -1,0 +1,5 @@
+"0","seasonality <-"
+"0","  df %>%"
+"0","  mutate(Sold_date = make_datetime(YrSold, MoSold)) %>%"
+"0","  group_by(Sold_date ) %>%"
+"0","  summarize(`Number of house sold`= n())"

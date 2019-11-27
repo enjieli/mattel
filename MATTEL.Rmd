@@ -1,0 +1,220 @@
+---
+title: "MATTEL DATA TEST"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'SUMMARY.html'))})
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r echo = FALSE, include=FALSE}
+rm(list=ls())
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(plotly)
+library(forecast)
+library(cowplot)
+
+
+df<- read_csv("data/data.csv")
+names(df)
+str(df)
+```
+
+## Summary
+</div>
+<div style="margin-top:10px;">
+####*Question 1)*: In each neighborhood of Ames, what is the median sale price for homes sold in 2006 which have an indoor square footage of greater than or equal to 2000 ft. (excluding porches, garages, decks, and veneers)
+<div style="margin-bottom:20px;">
+</div>
+
+```{r echo = FALSE, include=FALSE}
+median_Sale_price_2006 <- 
+  df %>%
+  filter(YrSold==2006) %>%
+  filter(GrLivArea>=2000) %>%
+  group_by(Neighborhood) %>%
+  summarise(median_sale_price= median(SalePrice))
+```
+
+```{r echo = FALSE}
+
+bbplot<- 
+  df %>%
+  filter(YrSold==2006) %>%
+  filter(GrLivArea>=2000) %>%
+  ggplot( aes(x=Neighborhood, y= SalePrice, fill=Neighborhood ))+ 
+  geom_boxplot(outlier.colour="black", outlier.shape=16, outlier.size=2)+
+  scale_y_continuous(labels = comma)+
+  theme_minimal()+
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45)) 
+  
+  
+ggplotly(bbplot)
+```
+
+</div>
+<div style="margin-top:100px;">
+####*Question 2)*: A client approaches you with a question about the local housing market. They’re interested in whether more homes are sold at certain times of year than others? In other words, is there seasonality?
+<div style="margin-bottom:20px;">
+</div>
+```{r echo = FALSE, include=FALSE}
+seasonality <-
+  df %>%
+  mutate(Sold_date = make_datetime(YrSold, MoSold)) %>%
+  group_by(Sold_date ) %>%
+  summarize(`Number of house sold`= n())
+```
+
+```{r echo = FALSE}
+p<- seasonality %>% 
+  ggplot(aes(x=Sold_date, y= `Number of house sold`)) + 
+  geom_line(color = 'rosybrown',linetype = "dashed" , size= 0.3) +
+  geom_point(color = "rosybrown2", size = 1) +
+  scale_x_datetime(labels = date_format("%Y-%m"), 
+                   breaks = date_breaks("3 months")) + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ylab("Number of houses sold") +
+  xlab("")
+
+ggplotly(p)
+```
+
+```{r echo = FALSE, include=FALSE}
+myts <- ts(seasonality$`Number of house sold`, frequency=12, start = c(2006, 01), end = c(2010, 07))
+
+myds_month <- decompose(myts, type = "mult")
+myds_month
+```
+
+```{r echo = FALSE}
+plot(myds_month)
+```
+
+```{r echo = FALSE, include=FALSE}
+my_df_ts <- data.frame(Houses_sold = myts, as.numeric(time(myts)))
+names(my_df_ts) <- c("Houses_sold", "time")
+
+mymodel <- tslm(Houses_sold~season+trend,my_df_ts)
+
+# And forecast using this same model
+my_fc <- forecast(mymodel)
+my_fc
+```
+
+
+```{r echo = FALSE}
+autoplot(my_fc) +
+  theme_minimal() +
+  ggtitle("Forecasts from time series linear regression model") +
+  theme(plot.title = element_text(hjust = 0.5,face = "bold"))
+```
+
+
+
+</div>
+<div style="margin-top:100px;">
+####*Question 3)*:  You're a contractor consulting for a client who wants to remodel their home and then sell it on the market. The home the client occupies is a 3 bedroom / 2 bathroom 1500 sq. ft. house. They're deciding between the following options for the remodel:
+>a) Adding a new bedroom measuring 130 sq. ft.
+>b) Adding a new half bathroom measuring 80 sq. ft. 
+>c) Expanding the living room by 400 sq. ft.
+
+####Assume that the cost of all three remodel options is equal. Based on the data provided, which option do you think will provide the greatest predicted increase in home value and why? What other information would you seek out that might help you make the decision? Please provide any visualizations, tables, etc. to support your findings.
+<div style="margin-bottom:20px;">
+</div>
+
+```{r echo = FALSE, include=FALSE}
+load("data/Q3.rda")
+```
+
+</div>
+<div style="margin-top:50px;">
+```{r echo = FALSE, fig.width=15, fig.height=6}
+Q3 %>%
+  mutate(value=value*100) %>%
+  ggplot(aes(x=name, y=value, fill= name)) +
+  geom_bar(stat="identity", show.legend = FALSE, width = 0.3) +
+  scale_fill_brewer(palette = "Set2") +
+  scale_x_discrete(labels=c("Option_A" = "Add 130 sq ft bedroom", 
+                            "Option_B" = "Add 80 sq ft half bath", "Option_C" = "Expand 400 sq ft livingroom")) + 
+  coord_flip() +
+  theme_cowplot()+
+  xlab("") +
+  ylab("Percentage increase in sale price")+
+  theme(axis.text=element_text(size=15))
+```
+<div style="margin-bottom:20px;">
+</div>
+Predictions were made using generated data based on Lasso Regression. Because this is a simple linear regression without any interaction, three options would cause linear changes in log(sale price).\
+
+I assumed that those new modifications would be above grade and such changes would not change the overall quality of the hosue. However, addtional inforamtion on whether the modification was above grade or in the basement, whether it would add a fireplace, as well as heating would increase prediction accuracy.
+
+```{r echo = FALSE, include=FALSE}
+load("data/lasso_coef_frame.rda")
+```
+
+</div>
+<div style="margin-top:50px;">
+```{r echo = FALSE, fig.width=8, fig.height=6}
+ggplot(lasso_coef_frame, aes(x=reorder(lasso_coefs,value), y=value, color= value > 0)) + 
+  geom_pointrange(aes(ymin=0, ymax=value),show.legend = FALSE) + 
+  ggtitle("Coefficients of lasso model") + 
+  coord_flip() +
+  ylab("Coefficient") +
+  xlab(NULL) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+<div style="margin-bottom:20px;">
+</div>
+
+
+
+</div>
+<div style="margin-top:100px;">
+####*Question 4)*:  You own a single-family home (i.e. BldgType = “1Fam”) with 4 bedrooms that you are looking to rent out or sell. Assume you can generate a yearly rent that is 10% of the estimated sales price. Your options include:
+>a) Convert the home into a duplex and rent both units. 
+>b) Rent the home as is.
+>c) Sell the home for market value.
+
+#### Assume that cost is negligible for our purposes. Which option maximizes revenue received in 5 years? 10 years? 15 years? List out all assumptions you are making in your calculations and outline your thought process. 
+<div style="margin-bottom:20px;">
+</div>
+
+
+```{r echo = FALSE, include=FALSE}
+load("data/Q4.rda")
+```
+
+</div>
+<div style="margin-top:50px;">
+```{r echo = FALSE, fig.width=12, fig.height=10}
+q4 %>%
+  ggplot(aes(type, value, fill= type)) +
+  geom_boxplot(show.legend = FALSE) +
+  scale_x_discrete(labels=c("duplex_yearly_rent" = "Convert to duplex", 
+                            "fam_yearly_rent" = "Rent the house", "SalePrice" = "Sell the house")) + 
+  scale_y_continuous(labels = comma) + 
+  facet_wrap(~time) +
+  xlab("")+
+  theme(axis.text=element_text(size=12), strip.text.x = element_text(size = 15))
+
+```
+<div style="margin-bottom:20px;">
+</div>
+
+There are 178 data points from the sample dataset that are single-family housing with 4 bedrooms. \
+It is quite straight forward to calculate the yearly rent.\
+For conversion to duplex estimation, I divided most of the numerical varaibles by 2 then predicted the sale price using the Lasso model developed earlier. In general, categorical variables and condition related variables were kept as it is. \
+
+
+
+

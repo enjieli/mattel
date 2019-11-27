@@ -1,0 +1,7 @@
+"0","ggplot(lasso_coef_frame, aes(x=reorder(lasso_coefs,value), y=value, color= value > 0)) + "
+"0","  geom_pointrange(aes(ymin=0, ymax=value),show.legend = FALSE) + "
+"0","  ggtitle(""Coefficients of lasso model"") + "
+"0","  coord_flip() +"
+"0","  ylab(""Coefficient"") +"
+"0","  xlab(NULL) +"
+"0","  theme(plot.title = element_text(hjust = 0.5))"
